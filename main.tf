@@ -1,4 +1,4 @@
-# Version 1 - main.tf
+# Version 2 - main.tf
 terraform {
   required_providers {
     helm = {
@@ -18,8 +18,10 @@ resource "helm_release" "external_dns" {
   name       = "external-dns"
   repository = "https://kubernetes-sigs.github.io/external-dns/"
   chart      = "external-dns"
-  version    = "1.13.0"
-  namespace  = "kube-system"
+  version    = "1.14.3"  # CHANGED: Updated version
+  namespace  = "external-dns"  # CHANGED: Different namespace
+  
+  create_namespace = true  # ADDED: Create namespace
 
   set {
     name  = "provider"
@@ -28,7 +30,7 @@ resource "helm_release" "external_dns" {
 
   set {
     name  = "aws.zoneType"
-    value = "public"
+    value = var.zone_type  # CHANGED: Made configurable
   }
 
   set {
@@ -38,7 +40,7 @@ resource "helm_release" "external_dns" {
 
   set {
     name  = "interval"
-    value = "1m"
+    value = var.sync_interval  # CHANGED: Made configurable
   }
 
   set {
@@ -50,20 +52,33 @@ resource "helm_release" "external_dns" {
     name  = "txtOwnerId"
     value = var.cluster_name
   }
+
+  # ADDED: Domain filters configuration
+  set {
+    name  = "domainFilters"
+    value = "{${join(",", var.domain_filters)}}"
+  }
+
+  # ADDED: Policy configuration
+  set {
+    name  = "policy"
+    value = var.sync_policy
+  }
 }
 
-resource "helm_release" "cert_manager" {
-  name       = "cert-manager"
-  repository = "https://charts.jetstack.io"
-  chart      = "cert-manager"
-  version    = "v1.12.2"
-  namespace  = "cert-manager"
+# ADDED: New nginx-ingress helm release
+resource "helm_release" "nginx_ingress" {
+  name       = "nginx-ingress"
+  repository = "https://kubernetes.github.io/ingress-nginx"
+  chart      = "ingress-nginx"
+  version    = "4.7.1"
+  namespace  = "ingress-nginx"
   
   create_namespace = true
   
   set {
-    name  = "installCRDs"
-    value = "true"
+    name  = "controller.service.type"
+    value = "LoadBalancer"
   }
 }
 
@@ -75,5 +90,17 @@ resource "kubernetes_config_map" "external_dns_config" {
 
   data = {
     "config.yaml" = "aws-zone-type: public\nlog-level: debug\nsync-interval: 30s"  # CHANGED: Updated content
+  }
+}
+
+# ADDED: New service account resource
+resource "kubernetes_service_account" "external_dns" {
+  metadata {
+    name      = "external-dns"
+    namespace = "external-dns"
+    
+    annotations = {
+      "eks.amazonaws.com/role-arn" = var.external_dns_role_arn
+    }
   }
 }
